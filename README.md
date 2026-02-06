@@ -57,7 +57,7 @@ Swap a naive Movement Processor for a full physics bundle? The chain remains int
 - **Multi-Scale Composition** — Primitives wire into mid-level bundles (e.g., velocity integration from raw axes), which bundle into systems (e.g., character controller), all remaining uniform Processors with provenance chains to the atoms.
 - **Diverse Runtimes** — Minimal interpreters prioritize portability; pro implementations fuse graphs for bleeding-edge performance—all from the same Networks.
 - **Commons of Remixable Pigments** — Ultra-granular primitives bundle into reusable composites (like master painters mixing paints), distributed as Nostr events. Communities remix ad nauseam—prototype novel games in hours by combining high-level bundles, then build to optimized executables.
-- **DGS Integration** — WOCS coordinates Processor bounties and curation; AEMS imports as Records; Nostr distributes plain-text packages permissionlessly.
+- **DGS Integration** — WOCS coordinates Processor services and curation; AEMS imports as Records; Nostr distributes plain-text packages permissionlessly.
 
 ## What RUNS Deliberately Excludes
 
@@ -125,7 +125,7 @@ Community bundles targeting Protocol shapes, distributed as Nostr events.
 |----------|-------------------------------|--------------------------------------------|
 | AEMS     | Persistent artifacts          | Imported as Records                        |
 | Ludic    | Rule descriptions             | Implemented via Processors                 |
-| WOCS     | Coordination/bounties/curation| Funds Processor development, relay hosting, and bundle ranking |
+| WOCS     | Coordination/services/curation| Funds Processor development, relay hosting, and bundle ranking |
 
 ## Comparison
 
