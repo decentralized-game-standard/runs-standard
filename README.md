@@ -90,7 +90,7 @@ Community bundles targeting protocol shapes, published as plain-text Nostr event
 
 ## Connection to Notation and Craft
 
-RUNS is the runtime target for the [MAPS Notation](https://github.com/enduring-game-standard/maps-notation) tradition. The connection is direct: States in notation become Records that RUNS processes. Verbs become Processors that transform them. Arcs become Networks that wire them together. A designer who sketches a combat system in notation is writing the skeleton that the composable infrastructure reads. This is what makes the three pillars of EGS interlock: patient capital funds the designer, durable substrate runs the game, and notation bridges intent to execution.
+RUNS is the runtime complement to the [MAPS Notation](https://github.com/enduring-game-standard/maps-notation). The connection is concrete: States in notation become Records that RUNS processes. Verbs become Processors that transform them. Arcs become Networks that wire them together. A designer who sketches a combat system in notation is writing the skeleton that the composable infrastructure reads. MAPS describes the rules; RUNS executes the game.
 
 ## What RUNS Deliberately Excludes
 
@@ -106,9 +106,9 @@ RUNS stays restrained and neutral:
 
 | Component | Role                           | RUNS Relationship                                              |
 |-----------|--------------------------------|----------------------------------------------------------------|
-| AEMS      | Persistent entities            | Referenced for entity data                                     |
-| MAPS      | Rule descriptions              | Notation targets Records, Processors, Networks                 |
-| WOCS      | Coordination and services      | Funds Processor development, relay hosting, and bundle ranking |
+| AEMS      | The things                     | Referenced for entity data                                     |
+| MAPS      | The rules                      | Notation targets Records, Processors, Networks                 |
+| WOCS      | The coordination               | Coordinates all ecosystem infrastructure — hosting, audits, development, tournaments |
 
 ## Comparison
 
