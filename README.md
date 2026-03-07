@@ -38,8 +38,8 @@ RUNS unbundles everything:
 
 1. **Records** — The atoms: generic containers (entities) with IDs and typed Fields.
 2. **Fields** — The data: typed values attached to Records, from ultra-granular primitives (e.g., `runs:position_x`) to bundled composites (e.g., `runs:transform`). The type system is open — Processors define whatever input/output shapes their logic requires. The [RUNS Library](https://github.com/enduring-game-standard/runs-library) recommends common shapes for interoperability, but these are a shared vocabulary, not a closed universe.
-3. **Processors** — The logic: pure, stateless transformations that read Fields and write Fields. A Processor has no side effects and no hidden state. It can be as granular as a vector addition or as bundled as a full character controller.
-4. **Networks** — The graph: explicit wiring of Processors into data-flow chains. Networks can bundle into higher-scale meta-Processors for multi-level composition.
+3. **Processors** — The logic: pure, stateless transformations that read Fields and write Fields. A Processor has no side effects and no hidden state — meaning same inputs always produce the same outputs, with no externally visible mutation between invocations. Internal computation (local variables, scratch buffers, intermediate values) is unrestricted; the contract is at the interface boundary, not inside the implementation. A Processor can be as granular as a vector addition or as bundled as a full character controller.
+4. **Networks** — The graph: explicit wiring of Processors into data-flow chains. Wiring may include **guarded Arcs** — transitions conditioned on Field values (e.g., dispatching to different Processors based on an entity's current state). This mirrors MAPS notation, where Arcs carry guard expressions. When two Processors share a data dependency on the same Field, the Network's wiring determines execution order; a linear chain is a valid and common topology. Networks can bundle into higher-scale meta-Processors for multi-level composition.
 5. **Runtimes** — The compiler and executor: translates RUNS source (Networks, Records, Processors) into platform-specific builds, manages scheduling, and handles input/output. A minimal interpreter prioritizes portability; a performance-focused implementation compiles and fuses graphs for native speed. Both consume the same RUNS source.
 6. **Runtime Interface** — The declared boundary between a Network's game logic and its platform-dependent endpoints. A Network declares the Fields it requires from the runtime (input: timing, player commands) and the Fields it produces for the runtime (output: spatial state, visual state, audio triggers). Swapping one runtime for another leaves the game Network — and everything inside it — unchanged. This is not a new primitive; it is a naming convention on existing components that formalizes portability.
 
@@ -73,6 +73,30 @@ This Processor does one thing: Euler integration. It reads three Fields, writes 
 
 Processors wire into bundles. Bundles wire into systems. A character controller bundles movement, grounding, and collision. A game bundles controllers, rendering, and input. Every layer remains a uniform Processor, composable and inspectable from the top-level system down to the individual vector addition.
 
+### Guarded Dispatch
+
+Networks can express data-driven routing through guarded Arcs. This is the RUNS implementation of MAPS guard expressions — a transition fires only when its condition evaluates to true over current Field values.
+
+A state machine (e.g., an enemy AI cycling through look, chase, and attack behaviors) is not a single Processor that internally dispatches. It is a Network of guarded Arcs, each routing to a named Processor:
+
+```yaml
+network enemy_behavior
+inputs:
+  mobj: doom:mobj
+outputs:
+  mobj: doom:mobj
+
+arcs:
+  - guard: mobj.state_action == "look"
+    processor: doom:ai_look
+  - guard: mobj.state_action == "chase"
+    processor: doom:ai_chase
+  - guard: mobj.state_action == "attack"
+    processor: doom:ai_attack
+```
+
+Each branch is a named, inspectable Processor with declared inputs and outputs. The guard expressions and the Processors they route to are all plain-text and visible in the Network graph. Large dispatch tables (hundreds of states) are organized through bundling — sub-Networks grouped by behavior phase, bundled into a meta-Processor for the entity type, composed into the top-level game Network. The decomposition is spaghetti by nature; the bundling hierarchy makes it readable.
+
 ## Architecture: Protocol, Library, Ecosystem
 
 RUNS separates what must be universal from what should be shared from what can vary freely.
@@ -91,7 +115,7 @@ Community bundles targeting protocol shapes, published as plain-text Nostr event
 
 ## Connection to Notation and Craft
 
-RUNS is the implementation complement to [MAPS Notation](https://github.com/enduring-game-standard/maps-notation). The relationship is design-to-implementation: MAPS describes a game's rules as studyable notation; RUNS implements those rules as composable source. States in notation are implemented as Records. Verbs are implemented as Processors. Arcs are implemented as Network wiring. A designer who writes a combat system in MAPS notation is writing the blueprint from which a developer (or tool) builds the corresponding RUNS source. Both artifacts persist independently on the commons — the notation for study, the source for compilation and play.
+RUNS is the implementation complement to [MAPS Notation](https://github.com/enduring-game-standard/maps-notation). The relationship is design-to-implementation: MAPS describes a game's rules as studyable notation; RUNS implements those rules as composable source. States in notation are implemented as Records. Verbs are implemented as Processors. Arcs — including their guard expressions — are implemented as Network wiring with guarded transitions. A designer who writes a combat system in MAPS notation is writing the blueprint from which a developer (or tool) builds the corresponding RUNS source. Both artifacts persist independently on the commons — the notation for study, the source for compilation and play.
 
 ## What RUNS Deliberately Excludes
 
