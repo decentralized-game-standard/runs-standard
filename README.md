@@ -5,7 +5,7 @@
 · ⚡ **[WOCS](https://github.com/enduring-game-standard/wocs-protocol)**  
 · 🎼 **[MAPS](https://github.com/enduring-game-standard/maps-notation)**  
 · ❓ **[FAQ](https://github.com/enduring-game-standard/.github/blob/main/profile/FAQ.md)**
-· 🔤 **[Glossary](https://github.com/enduring-game-standard/.github/blob/main/profile/GLOSSARY.md)**
+· 🔤 **[Glossary](https://github.com/enduring-game-standard/.github/blob/main/profile/README.md#glossary)**
 
 > **Status**: Draft / RFC  
 > **Version**: 0.1.0
