@@ -2,8 +2,11 @@
 
 🏠 **[EGS Overview](https://github.com/enduring-game-standard)** · 📦 **[AEMS](https://github.com/enduring-game-standard/aems-schema)** · 🎯 **[AEMS Conventions](https://github.com/enduring-game-standard/aems-conventions)** · 🔧 **[RUNS](https://github.com/enduring-game-standard/runs-spec)** · 📖 **[RUNS Library](https://github.com/enduring-game-standard/runs-library)** · ⚡ **[WOCS](https://github.com/enduring-game-standard/wocs-protocol)** · 🎼 **[MAPS](https://github.com/enduring-game-standard/maps-notation)** · 🎶 **[MAPS Library](https://github.com/enduring-game-standard/maps-library)** · ❓ **[FAQ](https://github.com/enduring-game-standard/.github/blob/main/profile/FAQ.md)** · 🔤 **[Glossary](https://github.com/enduring-game-standard/.github/blob/main/profile/README.md#glossary)**
 
-> **Status**: Draft / RFC  
-> **Version**: 0.1.0
+> **Status**: Design stage. No working reference implementation exists yet — no parser,
+> no evaluator, no compiler. The specifications are precise enough to implement from,
+> and the first implementation is expected to correct them. Every fidelity claim in
+> this ecosystem is currently **asserted** (a person or AI judged it correct by
+> reading), not **verified** (checked mechanically against an oracle).
 
 ## A Composable Substrate for Enduring Games
 
