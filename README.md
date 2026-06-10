@@ -115,7 +115,7 @@ Community bundles targeting protocol shapes, published as plain-text Nostr event
 
 ## Connection to Notation and Craft
 
-RUNS is the implementation complement to [MAPS Notation](https://github.com/enduring-game-standard/maps-notation). The relationship is design-to-implementation: MAPS describes a game's rules as studyable notation; RUNS implements those rules as composable source. States in notation are implemented as Records. Verbs are implemented as Processors. Arcs — including their guard expressions — are implemented as Network wiring with guarded transitions. A designer who writes a combat system in MAPS notation is writing the blueprint from which a developer (or tool) builds the corresponding RUNS source. Both artifacts persist independently on the commons — the notation for study, the source for compilation and play.
+RUNS is the implementation complement to [MAPS Notation](https://github.com/enduring-game-standard/maps-notation). The relationship is design-to-implementation: MAPS describes a game's rules as studyable notation; RUNS implements those rules as composable source. The term-for-term mapping between the two vocabularies is owned by the [EGS correspondence map](https://github.com/enduring-game-standard/.github/blob/main/profile/CORRESPONDENCE.md). A designer who writes a combat system in MAPS notation is writing the blueprint from which a developer (or tool) builds the corresponding RUNS source. Both artifacts persist independently on the commons — the notation for study, the source for compilation and play.
 
 ## What RUNS Deliberately Excludes
 
@@ -138,6 +138,8 @@ RUNS components are distributed through Nostr as plain-text events. This is a di
 Nostr is the commons — the package registry where source lives. The compiled build is the deployment. The same relationship holds between any package registry and the programs built from its contents.
 
 ## Integration with EGS
+
+The full inter-protocol topology is owned by the [EGS correspondence map](https://github.com/enduring-game-standard/.github/blob/main/profile/CORRESPONDENCE.md). RUNS's own edges:
 
 | Component | Role                           | RUNS Relationship                                              |
 |-----------|--------------------------------|----------------------------------------------------------------|
