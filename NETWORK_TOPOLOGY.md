@@ -1,690 +1,634 @@
 # RUNS Network Topology
 
-> **Status**: Draft Specification
-> **Version**: 1.0.0-draft.1
+> **Layer**: Wiring (Networks)
 > **File extension**: `.runs`
+> **Status**: Design stage — no reference scheduler or validator exists yet. Precise
+> enough to implement from; the first implementation is expected to correct it.
 
 ## Purpose
 
-This specification defines the Network topology: the wiring syntax that connects Records to Processors and governs the execution order of a game tick. It is the composition layer of the RUNS protocol — the mechanism by which pure, stateless Processors are organized into deterministic, bounded, inspectable game logic.
+This specification defines the Network: the wiring layer that connects Records to
+Processors and constitutes one game tick. Processors define computation
+([DIGS](./DIGS_EXPRESSION_LANGUAGE.md)); Records define state
+([Record Schema](./RECORD_SCHEMA.md)); Networks define how data flows between them —
+which Processor reads which Fields, where its outputs land, and how entity
+collections are routed through guarded arcs.
 
-A Network is a bipartite directed graph where Records and Processors are two disjoint node types. Every arc connects a Record to a Processor or a Processor to a Record. An arc never connects two Records or two Processors directly. This bipartite structure is not a convention — it is a mandatory invariant. Violation makes a Network non-compliant.
-
-Processors define computation (specified in [DIGS](./DIGS_EXPRESSION_LANGUAGE.md)). Records define state. Networks define the wiring between them — what fires when, in what order, over which entities, under what conditions. The Network is the composition layer where game architecture becomes explicit, inspectable, and composable.
-
-Networks are declared in `.runs` files alongside Record schemas and enum definitions. The `network` keyword introduces a Network declaration; the `record` keyword introduces a Record schema. Both share the `.runs` extension because both describe structure, not computation. Processor bodies (computation) use the `.runs-prim` extension and the DIGS syntax.
-
-Every decision in this specification is driven by one question: *can a solo developer in a century implement this from scratch, with nothing but this document?*
+Every decision in this specification is driven by one question: *can a solo developer
+in a century implement this from scratch, with nothing but this document?*
 
 ---
 
-## Design Constraints
+## The Model
 
-The Network topology is:
+### A bipartite graph
 
-1. **Bipartite** — Every arc connects a Record to a Processor or a Processor to a Record. No Processor reads directly from another Processor's output without an intermediate Record. No Record writes directly to another Record. All data flow is mediated by the bipartite structure.
-2. **Deterministic** — The same Network with the same input Records produces the same output Records, in the same execution order, on every platform, forever. There is no nondeterminism in firing order, entity iteration, or guard evaluation.
-3. **Bounded** — All iteration is over finite, declared collections. Every tick terminates in finite time and bounded memory. The compiler can prove this statically from the Network source alone, without executing the program.
-4. **Static** — The Network topology is fixed at compile time. No Processors are added or removed at runtime. No arcs are rewired during execution. Variation at runtime is expressed through guard conditions on static arcs, not through topology modification.
-5. **Concurrent** — Processors that share no Records are independent. The Network topology defines the causal dependencies between Processors through their shared Record access. A compliant runtime must produce results equivalent to any valid execution order of independent Processors — which includes simultaneous execution.
+A Network is a bipartite directed graph with two disjoint node kinds: Records
+(places, nouns) and Processors (transitions, verbs). Every arc connects a Record to a
+Processor or a Processor to a Record. Data flows strictly **Record → Processor →
+Record** — never Record → Record (no verb, so no transformation) and never
+Processor → Processor (no noun, so no data at rest). This is not a convention; it is
+the mandatory structural invariant. A Network is the only thing that knows both
+sides: Records and Processors are mutually opaque, and neither knows where its data
+came from or goes.
+
+The natural reading is a **colored Petri net**: places = Records, tokens = Field
+values (the colors), transitions = Processors, guarded arcs = gates.
+
+A Network references the Records and Processors it wires **by ID** and never embeds
+them. It is pure wiring.
+
+### The single-assignment law
+
+The law of the whole system, at every scale: **write once, never overwrite; pass
+shared things hand-to-hand.**
+
+- A place is written **once** per tick. A "changed" Record is a fresh value in a
+  fresh place — a new *version* — never an in-place overwrite.
+- A **shared resource** — a PRNG, an accumulator, a spawn queue, an object pool — is
+  **threaded**: passed hand-to-hand through the Processors that touch it as a chain
+  of distinct versions, `prng_v0 → P_a → prng_v1 → P_b → prng_v2`. Threading is
+  ordinary read-after-write wiring, nothing more.
+- The wiring syntax lets a step reuse a Record's name (`objects =
+  spacewar:collision_detect(objects, consts)`). That is shorthand, not mutation: each
+  rebinding is a new version, and textual order resolves which version a later
+  reference means — exactly like `let` shadowing in a DIGS body. A validator lowers
+  the wiring to explicit versions (SSA) and checks the law mechanically.
+
+Because places are single-assignment, the only dependency that can exist is
+read-after-write. One tick's dataflow is therefore a **DAG**, always.
+
+### Execution order is derived, never authored
+
+There is no execution-order primitive in RUNS — no phase list, no priorities, no
+scheduling directives. The author declares *wiring*; order is whatever the dataflow
+DAG implies:
+
+- A step that reads version N of a place runs after the step that produced
+  version N. That is the entire ordering rule.
+- Two steps **incomparable** in the DAG touch disjoint data — neither reads what the
+  other writes — so they **commute**. The net is **confluent**: every valid
+  topological order produces bit-identical results. A minimal runtime executes steps
+  top-to-bottom; a performance runtime runs incomparable steps in parallel; both are
+  equally conforming because the results cannot differ.
+- Where original behavior genuinely depends on order — ship 1 acts before ship 2,
+  consuming the PRNG first — that order is *data*: thread the shared resource and the
+  ordering becomes a derived fact of the chain. If a Network seems to need an
+  *authored* order that the data does not imply, the model says: some shared thing is
+  being overwritten instead of threaded. Thread it.
+
+### Where determinism holds: deterministic regions
+
+Confluence as stated above requires that the Processors themselves are deterministic
+— outputs a pure function of declared inputs. That is guaranteed for every Processor
+whose body is DIGS, by the language's core. It is *not* guaranteed for Processors
+whose job is to touch the platform (§The Platform Boundary): rendering, audio,
+input, timing, transport are inherently platform-coupled, and the standard
+deliberately does not specify a language for their bodies.
+
+The determinism guarantee therefore scopes to a **deterministic region**: a maximal
+subgraph all of whose Processors have DIGS bodies, bounded by the Records at its
+edge. Within such a region, determinism is *structural* — it follows from
+single-assignment plus partitioning guards (§Guards), with no further discipline
+needed. Outside it, the same petri-net topology holds but confluence is not claimed.
+
+A well-built game keeps all of its rules — everything that decides what happens —
+inside one deterministic region, and pushes platform contact to the edges. The
+conventions layer names this pattern and its consequences (the
+[RUNS Library](https://github.com/enduring-game-standard/runs-library) patterns
+document); the base spec only defines the structure that makes it possible.
+
+### The tick loop: bounded inside, unbounded across
+
+Every Processor is total — each invocation terminates (DIGS core). Every collection
+fold in the wiring is bounded by the collection it folds. So one tick always
+terminates. The **only** unbounded loop in all of RUNS is the cross-tick feedback:
+`state:` places carry this tick's final versions into the next tick, forever. That
+loop lives in the wiring, visible in the topology — never inside a body.
+
+The cross-tick `state:` places may grow without bound (an unbounded list appended to
+every tick) and the game may run without bound. Both are legal and fully
+deterministic. Two honest consequences, which are game bugs for tooling to catch,
+not language violations: a Network *can* livelock across ticks (a feedback cycle
+whose exit guard never fires), and a `state:` list *can* leak — deterministically,
+reproducibly, identically on every machine.
+
+### The two composition planes
+
+There are two ways Processors compose, seamed at the Record:
+
+- **Body-plane**: a DIGS body calls a sub-Processor (`let r = ns:proc(x)`). The
+  intermediates are anonymous body-locals — record-shaped *values*, never Records.
+  From outside, the whole call DAG collapses into one opaque transition. Governed by
+  DIGS's totality rules, not by the bipartite rule.
+- **Network-plane**: the bipartite graph proper, where every intermediate is a
+  Record — the only kind of intermediate that can persist across ticks, cross the
+  platform boundary, or be dispatched on by guards.
+
+Bundling and unbundling are exactly the act of crossing the seam. Promoting a
+body-local to a Record *unbundles* — the intermediate becomes inspectable,
+dispatchable, persistable wiring. Demoting a Record to a body-local *bundles* — it
+disappears inside a transition. "No Processor → Processor" is never violated:
+network-plane composition always lands in a Record; body-plane composition is
+interior to one transition.
+
+"Network" is **scale-free**. The whole game is one Network; every bundled chunk is
+also a Network (a **Sub-Network** when viewed from outside as a Processor). Fully
+unbundled, the game is a single flat bipartite graph; there is no privileged
+"sub-network" entity — only regions at different zoom levels. Tooling must treat
+free bundling/unbundling as the normal way to view and edit the graph.
 
 ---
 
 ## Network Declaration
 
-### Top-Level Network
+### Root Network
 
-A top-level Network declares the complete game tick. It is the entry point called by the runtime each frame.
+A root Network declares one complete game tick — the unit the host invokes:
 
 ```
 network spacewar:game_tick
 
   requires:
-    tick:         spacewar:tick_input
-    controls_1:   spacewar:player_controls
+    tick:        spacewar:tick_input
+    controls_1:  spacewar:player_controls
+    controls_2:  spacewar:player_controls
 
   produces:
-    render_list:  spacewar:render_object[]
-    match:        spacewar:match_result
+    frame:       spacewar:render_frame
 
   state:
     objects:      spacewar:object[24]
     prng:         spacewar:prng_state
+    result:       spacewar:match_result
+    consts:       spacewar:game_constants
     star_catalog: spacewar:star_catalog
+      source: spacewar:data/star_catalog
 
-  phases:
-    # ... (phase declarations)
+  local:
+    spawn_requests: spacewar:spawn_request[max: 24]
+
+  wiring:
+    # ... (steps; see §Wiring)
 ```
 
-A top-level Network has four blocks:
+| Block | Required | Contents | Lifetime |
+|-------|----------|----------|----------|
+| `requires:` | Yes | Inbound boundary Records — written by the host before each tick | One tick |
+| `produces:` | Yes | Outbound boundary Records — read by the host after each tick | One tick (snapshot) |
+| `state:` | No | Persistent Records — each tick starts from the previous tick's final versions | Cross-tick |
+| `local:` | No | Tick-local working Records — start each tick at their schema defaults | One tick |
+| `wiring:` | Yes | The dataflow steps | — |
 
-| Block | Required | Contents | Persists Between Ticks |
-|-------|----------|----------|----------------------|
-| `requires:` | Yes | Inbound boundary Records — provided by the runtime each tick | No (fresh each tick) |
-| `produces:` | Yes | Outbound boundary Records — read by the runtime after each tick | No (snapshot) |
-| `state:` | No | Internal persistent Records — carried between ticks | Yes |
-| `phases:` | Yes | Ordered execution stages | N/A |
-
-A Record appearing in `state:` may also appear in `produces:` — the runtime reads it after each tick, but the game logic owns and persists it.
+A place declared in `state:` may also be listed in `produces:` — the host reads it
+after each tick, but the game owns and persists it.
 
 ### Sub-Network
 
-A sub-Network is a reusable composition unit invoked from within a dispatch phase or another phase. It declares explicit inputs and outputs rather than boundary blocks:
+A Sub-Network is a Network used as a Processor: typed `inputs:` and `outputs:` at
+its boundary, wiring inside.
 
 ```
-network spacewar:ship_update
+network spacewar:ship_step
   inputs:
-    object:     spacewar:object
-    controls:   spacewar:player_controls
-    config:     spacewar:game_config
-    consts:     spacewar:game_constants
-    prng:       spacewar:prng_state
+    object:         spacewar:object
+    controls:       spacewar:player_controls
+    consts:         spacewar:game_constants
+    prng:           spacewar:prng_state
+    spawn_requests: spacewar:spawn_request[max: 24]
   outputs:
-    object:       spacewar:object
-    prng:         spacewar:prng_state
-    spawn_request: spacewar:spawn_request
+    object:         spacewar:object
+    prng:           spacewar:prng_state
+    spawn_requests: spacewar:spawn_request[max: 24]
 
-  phases:
-    - processor: spacewar:rotation_update(object, controls, config, consts)
-    - processor: spacewar:gravity(object, config, consts)
-    - processor: spacewar:thrust(object, consts)
-    - processor: spacewar:wrap_position(object.position_x, object.position_y)
-    - processor: spacewar:torpedo_launch(object, controls, config, consts)
-    - processor: spacewar:hyperspace_check(object, controls, consts)
+  wiring:
+    - (object, prng) = spacewar:rotation_update(object, controls, consts, prng)
+    - object = spacewar:gravity_apply(object, consts)
+    - object = spacewar:thrust(object, controls, consts)
+    - object = spacewar:wrap_position(object)
+    - (object, spawn_requests) = spacewar:torpedo_launch(object, controls, consts, spawn_requests)
+    - (object, prng) = spacewar:hyperspace_check(object, controls, consts, prng)
 ```
 
-Sub-Networks are Processors from the outside — they have typed inputs and outputs at their interface boundary. Inside, they contain phases that wire Records to Processors. This is the bundling mechanism for hierarchical composition: a sub-Network used in a dispatch arc is indistinguishable from a Processor at the call site.
+From the call site, a Sub-Network is indistinguishable from a Processor. Note the
+threading in the example: `object`, `prng`, and `spawn_requests` are each passed
+hand-to-hand down the pipeline — six links of a thread, written with name reuse, and
+the order of these steps is exactly the order the threads imply, nothing more.
 
-### Record Declarations
+### Place declarations
 
-Record references in `requires:`, `produces:`, `state:`, `inputs:`, and `outputs:` blocks follow the same format:
+References in `requires:`, `produces:`, `state:`, `local:`, `inputs:`, and
+`outputs:` blocks share one form:
 
 ```
 name: qualified_type
-name: qualified_type[count]
-name: qualified_type[max: count]
+name: qualified_type[N]
+name: qualified_type[max: N]
 name: qualified_type[]
 ```
 
-| Notation | Meaning |
-|----------|---------|
-| `type` | Single instance |
-| `type[N]` | Fixed collection of exactly N instances |
-| `type[max: N]` | Bounded collection of at most N instances |
-| `type[]` | Variable-length list (bounded by the Record schema's declaration) |
+Collection notations and their meaning — including that unbounded `[]` is legal and
+a declared bound is an opt-in memory contract — are defined in
+[Record Schema §Lists](./RECORD_SCHEMA.md#lists-and-the-memory-contract).
 
-The count in `[N]` or `[max: N]` must be a positive integer literal. This count is known at compile time and is the mechanism by which the compiler proves dispatch termination.
+### Data sources
 
-### Data Source Declaration
-
-A Record in the `state:` block may declare a build-time data source:
+A `state:` place may declare a build-time data source:
 
 ```
 state:
-  star_catalog:  spacewar:star_catalog
-    source: aems:manifestation/expensive_planetarium
-
-  sectors:       doom:sector[max: 512]
-    source: doom:wad/SECTORS
+  star_catalog: spacewar:star_catalog
+    source: spacewar:data/star_catalog
 ```
 
-The `source:` annotation tells the build tool where to find the data that populates this Record's initial state. The source identifier is a qualified reference to a data artifact — an AEMS Manifestation event, a game-specific data file (WAD lump, ROM segment), or an embedded literal.
-
-The `source:` annotation is declarative metadata. It does not affect the Network's runtime semantics. The build tool resolves sources and populates Records before the first tick. At runtime, the Record is already populated.
-
-The format of the source data — how binary bytes map to Record fields — is defined by a companion format specification artifact, not by this document. See §Relationship to Other EGS Components.
+`source:` is declarative metadata for the build tool: it names the artifact whose
+contents populate this place before the first tick — an AEMS Manifestation, a data
+file (WAD lump, ROM segment), an embedded table. It has no runtime semantics. How
+raw bytes map to Fields is defined by a companion format-specification artifact, not
+by this document.
 
 ---
 
-## Phases
+## Wiring
 
-A tick is an ordered sequence of phases. Phases execute in declaration order. Each phase is one of five types:
+The `wiring:` block is a list of **steps**. Each step binds the outputs of one
+invocation to named places. Steps are dataflow declarations, not an execution
+schedule: the order of the list resolves name reuse into versions (§The
+single-assignment law), and execution order is derived from the resulting DAG.
 
-| Phase Type | Keyword | Purpose |
-|-----------|---------|---------|
-| Processor | `processor:` | Unconditional invocation of a single Processor |
-| Network | `network:` | Unconditional invocation of a sub-Network |
-| Dispatch | `dispatch:` | Bounded iteration over an entity collection with guarded routing |
-| Iterate | `iterate:` | Bounded repetition of a phase body |
-
-### Processor Phase
-
-Invokes a single Processor unconditionally:
+### Invocation step
 
 ```
-- processor: spacewar:collision_detect(objects, consts)
+- objects = spacewar:collision_detect(objects, consts)
+- (objects, result) = spacewar:check_restart(objects, result, consts)
 ```
 
-The Processor receives the named Records as arguments. Argument order matches the Processor's declared `inputs:` order. The Processor's outputs overwrite the corresponding Record fields in the enclosing scope.
+The right side invokes a Processor or Sub-Network. Arguments are positional against
+the target's declared `inputs:`. The left side binds the target's declared
+`outputs:`, positionally: a single name, or a parenthesized tuple matching the
+output count. Every output must be bound — a Processor's output cannot be silently
+dropped (bind it to a `local:` place if it is genuinely unused at this call site,
+and say why in a comment).
 
-### Network Phase
+Argument and binding types must match the target's declarations exactly.
 
-Invokes a sub-Network unconditionally:
-
-```
-- network: spacewar:ship_update(object, controls, config, consts, prng)
-```
-
-Semantically identical to a Processor phase — the sub-Network's `inputs:` receive the named Records, and its `outputs:` overwrite the corresponding Records in the enclosing scope.
-
-### Dispatch Phase
-
-Iterates over a bounded Record collection, firing guarded arcs for each entity:
+### Guarded step
 
 ```
-- dispatch: objects
-    order: slot
+- guard: tick.is_substep
+  objects = physics:integrate(objects, tick)
+```
+
+The guard is a DIGS boolean expression over in-scope places. If true, the step runs.
+If false, every place the step would bind passes through unchanged — the guarded
+step is sugar for a two-arm partition whose `else` is identity. Either way the bound
+places get exactly one new version, so single-assignment is preserved.
+
+### Dispatch step
+
+Dispatch is the construct for *for each entity, route by state* — a **guarded,
+threaded fold** over a collection:
+
+```
+- (objects, prng, spawn_requests) = dispatch objects threading (prng, spawn_requests):
     arcs:
-      - guard: .state == ship and slot == 0
-        network: spacewar:ship_update(., controls_1, config, consts, prng)
+      - guard: .state == spacewar:ship and slot == 0
+        (., prng, spawn_requests) = spacewar:ship_step(., controls_1, consts, prng, spawn_requests)
 
-      - guard: .state == torpedo
-        processor: spacewar:torpedo_update(., consts)
+      - guard: .state == spacewar:ship and slot == 1
+        (., prng, spawn_requests) = spacewar:ship_step(., controls_2, consts, prng, spawn_requests)
 
-      - guard: .state == empty
-        skip: true
+      - guard: .state == spacewar:torpedo
+        . = spacewar:torpedo_update(., consts)
+
+      - guard: .state == spacewar:exploding
+        (., prng) = spacewar:explosion_tick(., prng)
+
+      - guard: .state == spacewar:hyperspace_in
+        (., prng) = spacewar:hyperspace_transit(., prng, consts)
+
+      - guard: .state == spacewar:hyperspace_out
+        (., prng) = spacewar:hyperspace_breakout(., prng, consts)
+
+      - guard: .state == spacewar:empty
+        pass
+
+      - else:
+        pass
 ```
 
-Components of a dispatch phase:
+Semantics, precisely:
 
-#### Collection Reference
+1. The dispatch folds over the collection **in index order**, 0 to len−1. This is
+   not an authored schedule; it is the definition of a fold over an ordered
+   collection — the same way a DIGS `for` visits a list. Where elements are
+   independent, the order is unobservable; where they share a thread, the thread
+   makes the order a derived fact.
+2. For each element, the guards are evaluated and **exactly one arc fires**
+   (§Guards). Within the arcs, `.` is the current element and `slot` is its index.
+3. The firing arc's step runs: `.` rebinds to the element's new version; threaded
+   names rebind hand-to-hand, carrying out of element *i* into element *i+1*.
+4. `pass` is the explicit identity arc: the element and threads pass through
+   unchanged.
+5. The dispatch's result is the tuple (new collection, final threaded versions).
 
-`dispatch: objects` names a Record collection from the enclosing scope (`state:`, `requires:`, or sub-Network `inputs:`). The collection must have a declared count (`[N]` or `[max: N]`).
+The `threading (...)` clause names the places passed hand-to-hand through the fold.
+It is how every classic "shared mutable resource" is expressed purely: the PRNG, a
+spawn queue, a score accumulator. A dispatch with an empty threading set is a pure
+per-element map, and a runtime may execute its elements in parallel.
 
-#### Ordering
+An arc target may also receive the *whole* collection as a read-only argument
+(`spacewar:perception(., objects, consts)`) for cross-entity queries. It reads the
+**input version** of the collection — the version the dispatch was given — so the
+fold's per-element writes never feed back into the same pass. A cross-entity effect
+that must observe earlier elements' updates within the same pass is data, and is
+expressed by threading it.
 
-`order: slot` specifies the deterministic iteration order:
+### Iterate step
 
-| Ordering | Meaning |
-|----------|---------|
-| `slot` | Iterate by index: 0, 1, 2, ..., N−1 |
-| `insertion` | Iterate in the order entities were added to the collection |
-
-Custom orderings may be defined by referencing a sort key field:
-
-```
-order: .priority descending
-```
-
-The ordering must be total and deterministic — every entity has a unique position in the iteration sequence. The compiler verifies this.
-
-#### Current Entity
-
-Within a dispatch phase, `.` (dot) refers to the current entity being dispatched. `.state`, `.position_x`, etc. access fields on the current entity. This notation is valid only inside dispatch arcs.
-
-The `slot` variable is implicitly available and holds the current entity's index in the collection (0-indexed).
-
-#### Guard Arcs
-
-Each arc in the `arcs:` block is a conditional route:
+Bounded repetition of a sub-wiring — a fold whose body is wiring:
 
 ```
-- guard: .state == torpedo
-  processor: spacewar:torpedo_update(., consts)
+- bodies = iterate 8 threading (bodies):
+    wiring:
+      - bodies = physics:relax_constraints(bodies, params)
 ```
 
-The `guard:` expression is a DIGS boolean expression evaluated against the current entity's fields. If the guard evaluates to `true`, the arc fires — invoking the named Processor or sub-Network. If `false`, the arc is skipped and the next arc is evaluated.
+The bound is an integer literal or a field path read once, before the first
+iteration; `n <= 0` makes the step an identity. The threaded places pass hand-to-hand
+through the iterations. Iterate steps may nest — totality is structural
+(fixed-before-loop bounds), not a static ceiling.
 
-**Mutual exclusivity:** For a given entity, at most one arc fires per dispatch. The compiler should warn (and may error) if guards are not mutually exclusive for all possible entity states. Overlapping guards produce undefined execution — different runtimes could fire different arcs.
+There is no `iterate until converged`. Convergence-to-fixpoint has no
+fixed-before-loop bound, so it has no place inside a tick; the iteration count is a
+declared game-design fact (more iterations, more accuracy, more cost). A game that
+wants convergence across time carries the residual in a `state:` place and continues
+next tick.
 
-**Completeness:** Every possible entity state must be handled by at least one arc. The compiler must verify that no entity state falls through all guards unhandled. The `skip: true` directive is the explicit "do nothing" handler for states that require no processing:
+### Guards and the two laws
 
-```
-- guard: .state == empty
-  skip: true
-```
+A guard is a DIGS boolean expression (the DIGS expression grammar, reused) over the
+current element's Fields, `slot`, and in-scope places. Guard expressions are DIGS
+**everywhere in the wiring** — including arcs that route to Processors whose bodies
+are target-native platform code. Wiring is wiring; only bodies vary.
 
-**Argument passing:** Arc targets receive arguments in parentheses. The `.` argument passes the current entity. Other arguments are Records from the enclosing scope. The compiler verifies that argument types match the target's declared inputs.
+Every guard set — a dispatch's arcs, or a guarded step with its implicit else —
+must satisfy two laws:
 
-**Secondary collection access:** An arc target may receive the full dispatch collection as a read-only secondary input, in addition to the current entity:
+1. **Totality (the determinism law).** The guards form a **complete partition**:
+   for every possible element, **exactly one** guard is true — no overlaps, no
+   gaps. When the discriminant is a **closed enum**, a tool verifies exhaustiveness
+   and exclusivity by enumeration, and a missing variant is a compile-time error.
+   When any guard term is open-typed (an integer, a compound condition like
+   `slot == 0`), completeness is unprovable, so an explicit **`else:` arc is
+   mandatory**. The Spacewar dispatch above shows both: the enum variants are
+   covered exhaustively, and because the `ship` arcs also test `slot`, the `else`
+   arc is required to make the partition total. `pass` and `else` exist precisely
+   so that "do nothing" and "everything not otherwise covered" are explicit,
+   checkable wiring instead of silent fall-through.
+2. **Thinness (the composability law).** A guard **reads a fact; it never computes
+   one.** It tests Fields a Processor already produced — a state tag,
+   `can_see_player` — with no sub-Processor calls, no new values, no work. If a
+   branch needs a fact that doesn't exist yet, a Processor computes it into a Field
+   first, and the guard reads that: **perceive → route → act**.
 
-```
-- guard: .needs_perception
-  processor: tlou:perception_scan(., all_agents, cover_graph)
-```
+The division of labor: decision structure lives in the arcs; computation lives in
+Processors. A guard never computes; a Processor never routes. **No Processor
+contains an `if` that steers the Network** — every arc target is
+state-machine-ignorant and composable, which is why a state machine in RUNS is a
+Network of guarded arcs, never a Processor.
 
-This enables cross-entity queries (collision detection, perception, spatial lookups) where a Processor operating on one entity needs to read from other entities in the same or different collections.
+That law is **decomposition-relative**. A coarse Processor may legally hold an
+internal `if state == torpedo:` dispatch — from the Network's view it is one opaque
+transition, so there is no Network routing to steer (a legitimate
+mid-decomposition station; granularity is a spectrum, and no point on it is
+non-compliant). The law binds once the routing targets are distinct Processors:
+"which Processor runs" is then a wiring decision, and resurrecting it as a
+dispatcher Processor is the forbidden steering. A body `if` that *computes* a
+discriminant (sets `state = exploding`) is action, not steering — producing a tag
+is a Processor's job; only reading one to route is a guard's.
 
-### Iterate Phase
-
-Bounded repetition of a phase body:
-
-```
-- iterate: 8
-  phases:
-    - dispatch: constraints[max: 512]
-        order: slot
-        arcs:
-          - guard: .active == true
-            processor: physics:resolve_constraint(., bodies)
-```
-
-The `iterate:` value specifies how many times the enclosed phases execute. The value must be:
-- A positive integer literal, or
-- A reference to a declared constant field with a known upper bound
-
-The compiler verifies the bound is finite and computes the maximum total Processor firings:
-
-```
-total_firings ≤ iterate_count × dispatch_count × arcs_per_entity
-```
-
-For the example above: `8 × 512 × 1 = 4,096` maximum firings. Finite, bounded, provable.
-
-Iterate phases exist for algorithms that require multiple passes over the same data per tick — physics constraint solvers, iterative relaxation, multi-pass rendering. The iteration count is a game design fact: more iterations produce more accurate results at higher computational cost. On constrained hardware, a lower count produces less accurate but still functional results.
-
-**What iterate does NOT permit:**
-
-- `iterate: until_converged` — the iteration count must be finite and known at compile time. Convergence-based termination is not expressible. See §Deliberate Exclusions.
-- Nesting limit: iterate phases may contain dispatch phases, processor phases, and network phases. An iterate phase may NOT contain another iterate phase. This prevents unbounded nesting and maintains the compiler's ability to compute a static upper bound on total firings.
+Guards and preconditions are the same fact stated on the two sides of the seam: the
+guard *asserts* it on the arc, the Processor's precondition *assumes* it in the
+body. In a well-formed Network the guards discharge every precondition (see
+[DIGS §Preconditions](./DIGS_EXPRESSION_LANGUAGE.md#preconditions)).
 
 ---
 
-## Concurrency Semantics
-
-The Network topology is a bipartite graph. The graph structure determines which Processors can execute independently.
-
-**Definition:** Two Processors are **independent** if and only if they share no Records — neither reads a Record that the other writes, and neither writes a Record that the other writes.
-
-**Rule:** Independent Processors are concurrent. A compliant runtime must produce results equivalent to any valid execution order of independent Processors, which includes simultaneous execution.
-
-**Consequence:** Phase ordering in the `phases:` block establishes sequencing only where data dependencies exist. Phases that access disjoint Record sets are concurrent by the topology, regardless of their declaration order. The declaration order serves as the canonical sequential interpretation that all valid execution orders must be equivalent to.
-
-**Example from Spacewar:**
-
-```
-# These phases access disjoint Record sets:
-- processor: spacewar:advance_starfield_scroll(starfield, config)
-- processor: spacewar:check_restart(objects, result, consts)
-```
-
-`advance_starfield_scroll` reads/writes `starfield` and reads `config`. `check_restart` reads/writes `objects` and `result`, reads `consts`. They share `consts` as a read-only input but neither writes to it. They are independent and may execute concurrently.
-
-```
-# These phases share a Record — they must be sequential:
-- processor: spacewar:check_restart(objects, result, consts)
-- processor: spacewar:update_scores(objects, result)
-```
-
-Both read and write `result`. `check_restart` must complete before `update_scores` begins. The declaration order determines which comes first.
-
-**Read-only sharing does not create a dependency.** Two Processors that both read the same Record (without writing it) are independent. Dependencies arise only from write-write or read-write conflicts on the same Record.
-
-**Within a dispatch phase:** Entities dispatched in the same phase are independent if and only if their Processors write only to the current entity's fields (`.`) and to no shared state. If a dispatched Processor writes to a shared Record (e.g., a score counter), entities within that dispatch are NOT independent and must execute in the declared order.
-
----
-
-## Hierarchical Composition
-
-### Bundling
-
-A sub-Network bundles a sequence of Processors into a reusable unit. From the outside, it behaves exactly like a Processor — typed inputs, typed outputs, invoked from an arc or phase.
-
-From the inside, it contains its own phases. This is the mechanism for hierarchical decomposition:
-
-```
-Top-Level Network
-  └─ Phase 1: Dispatch entities
-       ├─ Arc: ship → Sub-Network: ship_update
-       │                └─ Phase: rotation
-       │                └─ Phase: gravity
-       │                └─ Phase: thrust
-       │                └─ Phase: wrap
-       │                └─ Phase: torpedo
-       │                └─ Phase: hyperspace
-       ├─ Arc: torpedo → Processor: torpedo_update
-       └─ Arc: explosion → Processor: explosion_tick
-  └─ Phase 2: Processor: process_spawns
-  └─ Phase 3: Processor: collision_detect
-```
-
-There is no limit on nesting depth. A sub-Network may invoke other sub-Networks. The compiler flattens the entire hierarchy into a single execution schedule.
-
-### Hierarchical Data (Depth-Level Dispatch)
-
-Systems with parent-child relationships (skeletal animation, UI trees, scene graphs) use sequential dispatch phases ordered by hierarchy depth:
-
-```
-# Propagate transforms top-down through a bone hierarchy
-- dispatch: bones[max: 256]
-    order: .depth == 0
-    arcs:
-      - guard: .depth == 0
-        processor: animation:root_transform(.)
-
-- dispatch: bones[max: 256]
-    order: .depth == 1
-    arcs:
-      - guard: .depth == 1
-        processor: animation:child_transform(., bones[.parent_index])
-
-- dispatch: bones[max: 256]
-    order: .depth == 2
-    arcs:
-      - guard: .depth == 2
-        processor: animation:child_transform(., bones[.parent_index])
-```
-
-The maximum hierarchy depth must be known at compile time. Each depth level is a separate dispatch phase, ensuring parent transforms are computed before children. This pattern requires no new primitive — it is a composition of dispatch phases with depth-based guards.
-
-For game-specific hierarchies with fixed depth (skeletal rigs: typically ≤30 levels), this scales cleanly. For dynamic hierarchies with unknown depth, the formalism does not apply — see §Deliberate Exclusions.
-
----
-
-## Variable-Rate Execution
-
-The runtime drives the tick loop. The Network has no concept of "time" — it transforms inputs to outputs. Timing is a runtime concern.
-
-### Sub-Ticking
-
-Some systems require multiple passes at a higher frequency (e.g., physics at 240 Hz while rendering at 60 Hz). This is expressed through inbound boundary Records:
-
-```
-requires:
-  tick: runs:tick_input
-    # Includes:
-    #   frame_number: int
-    #   delta_time: fixed16
-    #   substep_index: int        # 0..substep_count-1
-    #   substep_count: int        # e.g. 4
-    #   is_substep: bool          # true during physics substeps
-```
-
-The runtime calls the Network multiple times per visual frame with different `substep_index` values. Guards in the Network select which phases run during substeps vs. main ticks:
-
-```
-phases:
-  # Physics runs every substep
-  - guard: tick.is_substep == true or tick.substep_index == 0
-    processor: physics:integrate(objects, tick)
-
-  # Scoring runs only on the main tick
-  - guard: tick.is_substep == false
-    processor: gameplay:update_scores(objects, result)
-```
-
-This is a library convention using the existing `requires:` mechanism. The spec provides the guarding mechanism; the library standardizes the field names. No additional primitive is required.
-
-### Variable-Rate Entity Dispatch
-
-Entities that update at different rates (e.g., DOOM's state machine where different states have different `tics` durations) are handled through guards:
-
-```
-- dispatch: mobjs
-    order: slot
-    arcs:
-      - guard: .tics_remaining == 0
-        processor: doom:state_transition(., state_table)
-      - guard: .tics_remaining > 0
-        processor: doom:decrement_tics(.)
-```
-
-The "cooperative multitasking" pattern — where only a fraction of entities perform AI logic each tick — emerges naturally from guard-based dispatch. No special scheduling primitive is needed.
-
----
-
-## Formal Grammar
-
-The following grammar is in extended Backus-Naur form (EBNF). Terminals are in double quotes. Nonterminals are in lowercase. `{ ... }` means zero or more repetitions. `[ ... ]` means optional.
-
-```ebnf
-network_file      = { comment NEWLINE }
-                    network_decl ;
-
-network_decl      = "network" qualified_name NEWLINE
-                    ( top_level_blocks | sub_network_blocks )
-                    phases_block ;
-
-(* Top-level Network: boundary declarations *)
-top_level_blocks  = requires_block
-                    produces_block
-                    [ state_block ] ;
-
-(* Sub-Network: explicit inputs/outputs *)
-sub_network_blocks = inputs_block
-                     outputs_block ;
-
-requires_block    = INDENT "requires:" NEWLINE
-                    { INDENT INDENT record_ref NEWLINE } ;
-
-produces_block    = INDENT "produces:" NEWLINE
-                    { INDENT INDENT record_ref NEWLINE } ;
-
-state_block       = INDENT "state:" NEWLINE
-                    { INDENT INDENT record_ref [ source_annotation ] NEWLINE } ;
-
-inputs_block      = INDENT "inputs:" NEWLINE
-                    { INDENT INDENT record_ref NEWLINE } ;
-
-outputs_block     = INDENT "outputs:" NEWLINE
-                    { INDENT INDENT record_ref NEWLINE } ;
-
-record_ref        = identifier ":" qualified_name [ collection_spec ] ;
-
-collection_spec   = "[" integer_literal "]"
-                  | "[" "max:" integer_literal "]"
-                  | "[" "]" ;
-
-source_annotation = NEWLINE INDENT INDENT INDENT "source:" qualified_ref ;
-qualified_ref     = qualified_name { "/" identifier } ;
-
-(* Phase declarations *)
-phases_block      = INDENT "phases:" NEWLINE
-                    { INDENT INDENT phase } ;
-
-phase             = processor_phase
-                  | network_phase
-                  | dispatch_phase
-                  | iterate_phase
-                  | guarded_phase ;
-
-processor_phase   = "-" "processor:" invocation NEWLINE ;
-
-network_phase     = "-" "network:" invocation NEWLINE ;
-
-guarded_phase     = "-" "guard:" expression NEWLINE
-                    INDENT phase ;
-
-dispatch_phase    = "-" "dispatch:" identifier NEWLINE
-                    INDENT "order:" ordering NEWLINE
-                    INDENT "arcs:" NEWLINE
-                    { INDENT arc } ;
-
-ordering          = "slot"
-                  | "insertion"
-                  | "." identifier [ "ascending" | "descending" ] ;
-
-arc               = "-" "guard:" expression NEWLINE
-                    ( INDENT "processor:" invocation NEWLINE
-                    | INDENT "network:" invocation NEWLINE
-                    | INDENT "skip:" "true" NEWLINE ) ;
-
-iterate_phase     = "-" "iterate:" bound NEWLINE
-                    INDENT phases_block ;
-
-bound             = integer_literal
-                  | field_path ;
-
-invocation        = qualified_name "(" [ arg_list ] ")" ;
-arg_list          = argument { "," argument } ;
-argument          = "."
-                  | identifier
-                  | field_path ;
-
-(* Shared with DIGS — guard expressions use DIGS expression syntax *)
-expression        = (* see DIGS_EXPRESSION_LANGUAGE.md §Formal Grammar *) ;
-
-field_path        = identifier { "." identifier } ;
-qualified_name    = [ identifier ":" ] identifier ;
-
-integer_literal   = DIGIT+ ;
-
-comment           = "#" { any_character } ;
-```
-
-### Grammar Notes
-
-1. **Indentation** follows the same rules as DIGS: two spaces per nesting level, no tabs.
-2. **Guard expressions** use the DIGS expression grammar. Any boolean DIGS expression is valid as a guard. Within a dispatch phase, `.` and `slot` are available as implicit variables.
-3. **Invocations** pass Records by name. The `.` argument in dispatch arcs passes the current entity. Arguments may use field paths (`object.position_x`) for partial Record access.
-4. **Comments** begin with `#` and extend to end of line, identical to DIGS.
-
----
-
-## Deliberate Exclusions
-
-The Network topology does not and will never express:
-
-| Excluded Feature | Rationale |
-|------------------|-----------|
-| Convergence loops (`iterate: until_stable`) | Violates boundedness. All iteration counts must be finite and compile-time-known. Physics accuracy is traded against iteration count — the game author picks N. |
-| Intra-tick feedback (cyclic data dependencies) | Violates the bipartite DAG within a tick. Feedback is achieved through state Records that persist between ticks. A Processor's output in tick N becomes its input in tick N+1 via `state:` Records. |
-| Dynamic topology | Violates static composition. Processors and arcs cannot be added, removed, or rewired at runtime. Variation is expressed through guard conditions on static arcs. |
-| Unbounded collections | Violates bounded memory. All collections in `dispatch:` must have a declared maximum size. The compile-time bound is what makes termination provable. |
-| Event-driven execution | The Network is a synchronous computation that fires once per tick. Event collection, buffering, and delivery to the Network are runtime concerns. The `requires:` boundary Records are the only mechanism by which external events enter the Network. |
-| Side effects | No I/O, no rendering, no sound. The Network produces outbound boundary Records. The runtime interprets them. What happens after the tick — pixels, waveforms, network packets — is entirely the runtime's business. |
-| Nested iterate phases | An `iterate:` phase may not contain another `iterate:` phase. This prevents unbounded nesting of repetition and maintains the compiler's ability to compute a static upper bound on total Processor firings per tick. |
+## The Platform Boundary
+
+### Boundary Records, and Records only
+
+The `requires:` and `produces:` blocks are the **boundary Records** — the entire
+contract between the game and the platform:
+
+- **Inbound** (`requires:`): the host writes them before each tick — timing, player
+  input, transport-delivered remote input.
+- **Outbound** (`produces:`): the host reads them after each tick — render state,
+  audio triggers, match results.
+
+The boundary is **Records only — never Processors**, and necessarily so. It joins
+two paradigms: deterministic, platform-agnostic computation on one side and
+platform-coupled machinery on the other. A noun is paradigm-neutral and can sit on
+the seam; a verb always carries a paradigm, so a "boundary Processor" would have to
+pick a side — at which point it is not the boundary but the first Processor of
+whichever side it joined. Any shape-translation is a Processor on one side *up to*
+the boundary, never *in* it.
+
+### Game-authored platform Processors vs. the host
+
+Two different things live beyond a deterministic region's edge, and they are not
+the same:
+
+- **Game-authored platform Processors** — the game's own I/O logic: building the
+  render representation for a target, mapping device input to intent, driving
+  audio. They are verb-pure Processors and full citizens of the Network, but their
+  bodies are written in **whatever the target demands** — the standard deliberately
+  specifies no language for them, because they are defined to be rewritten per
+  target. They are baked into the Build.
+- **The host (runtime)** — the generic, game-agnostic program that runs Builds: a
+  browser, a console, a libretro-style core, a server. It exposes platform
+  capabilities, writes the inbound boundary Records, and reads the outbound ones.
+
+Where the line falls between them is platform-dependent: a fantasy console exposing
+`draw_sprite` leaves the game little platform code to author; a raw framebuffer
+leaves it all. Both arrangements are conforming; the boundary Records are the
+contract in every case. The conventions layer names the regions this split creates
+and the Variant/Port taxonomy it enables — see the
+[RUNS Library](https://github.com/enduring-game-standard/runs-library).
+
+### Time, deterministically
+
+A deterministic region intended to replay identically — for lockstep multiplayer,
+replays, or verification — must receive time as data with one of two shapes: a
+**constant tick quantum** (a fixed timestep baked into the game's constants) or a
+**tick counter**. A wall-clock `delta_time` measured by the host varies per run and
+destroys replay determinism for the entire region downstream of it. Variable-rate
+concerns — render interpolation, substepping against real elapsed time — belong on
+the platform side of the boundary. The recommended boundary shapes for this live in
+the RUNS Library.
 
 ---
 
 ## Verification Properties
 
-A compliant compiler must verify the following properties statically. Violations are compile-time errors.
+A conforming validator checks the following statically. Violations are errors.
 
-### Bipartite Invariant
+1. **Bipartite invariant.** Every data dependency passes through a place. A value
+   produced by one Processor and read by another lands in a Record Field between
+   them, in the wiring.
+2. **Single assignment.** After lowering name reuse to explicit versions, no place
+   version is written twice, and every reference resolves to exactly one version.
+   "Two writers, same tick, no thread between them" is the canonical failure.
+3. **Guard partition.** Every guard set is exclusive and exhaustive: closed-enum
+   discriminants checked by enumeration; any open term forces an explicit `else`.
+   Overlapping guards are an error, not a warning — under a true partition there is
+   nothing left for execution order to decide.
+4. **Guard thinness.** Guards are pure reads of in-scope Fields: no sub-Processor
+   calls, no construction, no arithmetic beyond comparison and boolean composition
+   of read values.
+5. **Tick acyclicity.** The version-resolved dataflow graph of one tick is a DAG.
+   (With single assignment this holds by construction; the check is that name
+   resolution found no forward references.)
+6. **Binding completeness.** Every invocation binds all declared outputs; every
+   `produces:` place and every Sub-Network `outputs:` place is assigned exactly
+   once per tick on every path (guarded steps count as assignment on both arms).
+7. **Type agreement.** Every argument and binding matches the target's declared
+   types exactly.
+8. **Precondition discharge.** For every arc into a Processor, the guard (plus path
+   facts) implies the Processor's declared preconditions, where implication is
+   decidable; where it is not, the validator reports the obligation so a test
+   vector can cover it.
 
-Every data dependency passes through a Record. If Processor A produces a value that Processor B reads, that value must be written to a Record field by A and read from the same Record field by B. Direct Processor-to-Processor data flow is illegal.
+A validator does **not** check granularity ("too coarse" does not exist), does not
+require list bounds, and does not compute a mandatory static firing ceiling. A
+worst-case execution or memory report over declared bounds is a useful *advisory*
+for target-fitting — never a compliance gate.
 
-### Dispatch Boundedness
+---
 
-For every `dispatch:` phase, the collection has a declared size (`[N]` or `[max: N]`). The compiler computes the maximum number of Processor firings per tick as:
+## Formal Grammar
 
+EBNF. Terminals in double quotes; `{ }` is zero-or-more; `[ ]` is optional. INDENT
+denotes one two-space level relative to the enclosing line. Lexical rules (encoding,
+comments, identifiers, qualified names, literals) are shared with
+[DIGS](./DIGS_EXPRESSION_LANGUAGE.md#lexical-structure).
+
+```ebnf
+network_file      = network_decl ;
+
+network_decl      = "network" qualified_name NEWLINE
+                    ( root_blocks | sub_blocks )
+                    wiring_block ;
+
+root_blocks       = requires_block produces_block [ state_block ] [ local_block ] ;
+sub_blocks        = inputs_block outputs_block ;
+
+requires_block    = INDENT "requires:" NEWLINE { INDENT INDENT place_decl NEWLINE } ;
+produces_block    = INDENT "produces:" NEWLINE { INDENT INDENT place_decl NEWLINE } ;
+state_block       = INDENT "state:"    NEWLINE { INDENT INDENT place_decl [ source_annot ] NEWLINE } ;
+local_block       = INDENT "local:"    NEWLINE { INDENT INDENT place_decl NEWLINE } ;
+inputs_block      = INDENT "inputs:"   NEWLINE { INDENT INDENT place_decl NEWLINE } ;
+outputs_block     = INDENT "outputs:"  NEWLINE { INDENT INDENT place_decl NEWLINE } ;
+
+place_decl        = identifier ":" qualified_name [ collection_spec ] ;
+collection_spec   = "[" integer_literal "]"
+                  | "[" "max:" integer_literal "]"
+                  | "[" "]" ;
+
+source_annot      = NEWLINE INDENT INDENT INDENT "source:" qualified_ref ;
+qualified_ref     = qualified_name { "/" identifier } ;
+
+wiring_block      = INDENT "wiring:" NEWLINE { INDENT INDENT step } ;
+
+step              = "-" ( invocation_step
+                        | guarded_step
+                        | dispatch_step
+                        | iterate_step ) ;
+
+invocation_step   = binding "=" invocation NEWLINE ;
+binding           = identifier
+                  | "(" identifier { "," identifier } ")" ;
+
+guarded_step      = "guard:" expression NEWLINE
+                    INDENT invocation_step ;
+
+dispatch_step     = binding "=" "dispatch" identifier
+                    [ "threading" "(" identifier { "," identifier } ")" ]
+                    ":" NEWLINE
+                    INDENT "arcs:" NEWLINE
+                    { INDENT INDENT arc } ;
+
+arc               = "-" ( "guard:" expression | "else:" ) NEWLINE
+                    INDENT ( arc_step | "pass" NEWLINE ) ;
+arc_step          = arc_binding "=" invocation NEWLINE ;
+arc_binding       = arc_name
+                  | "(" arc_name { "," arc_name } ")" ;
+arc_name          = "." | identifier ;
+
+iterate_step      = binding "=" "iterate" bound
+                    [ "threading" "(" identifier { "," identifier } ")" ]
+                    ":" NEWLINE
+                    INDENT wiring_block ;
+bound             = integer_literal | field_path ;
+
+invocation        = qualified_name "(" [ arg_list ] ")" ;
+arg_list          = argument { "," argument } ;
+argument          = "." | field_path ;
+
+(* expression: the DIGS expression grammar; "." and "slot" are in scope
+   inside dispatch arcs *)
+field_path        = identifier { "." identifier } ;
+qualified_name    = [ identifier ":" ] identifier ;
+integer_literal   = DIGIT+ ;
 ```
-total ≤ Σ (iterate_count × dispatch_size × max_arcs_per_entity) for all phases
-```
 
-This sum is finite and computed from declarations alone.
+---
 
-### Guard Completeness
+## Deliberate Exclusions
 
-For every `dispatch:` phase, the set of guard conditions must cover all possible entity states. No entity may fall through all guards unhandled. The `skip: true` directive satisfies this requirement for states that need no processing.
+The wiring layer does not and will never express:
 
-The compiler may compute completeness by enumerating the cross-product of guard-relevant fields (typically enum states) and verifying coverage.
-
-### Guard Exclusivity
-
-For every `dispatch:` phase and every possible entity state, at most one guard evaluates to `true`. Overlapping guards — where two arcs could both fire for the same entity — are a compile-time warning at minimum and may be an error at the compiler's discretion.
-
-### Write Exclusivity
-
-No Record field is written by two different Processors in the same tick for the same entity. If Processor A writes `object.velocity_x` and Processor B also writes `object.velocity_x`, and both execute for the same entity in the same tick, the Network is invalid.
-
-Sequential phases writing the same field on the same entity are permitted — the later phase's write takes precedence. Write exclusivity applies only to Processors that could execute concurrently (same dispatch phase, or concurrent independent phases).
-
-### Phase Acyclicity
-
-The data dependency graph between phases must be acyclic. Phase A depends on Phase B if A reads a Record that B writes. The dependency graph must be a DAG. This is guaranteed by declaration order for sequential phases and by the concurrency rule for independent phases.
-
-### Output Completeness
-
-Every Record declared in `produces:` must be populated by at least one phase. Every Record declared in a sub-Network's `outputs:` must be populated by the sub-Network's phases.
+| Excluded | Rationale |
+|----------|-----------|
+| Authored execution order (`phases:`, priorities, scheduling hints) | Order is derived from dataflow. A Network that "needs" authored order has an unthreaded shared resource; the fix is threading, not a primitive. |
+| Convergence loops (`iterate until stable`) | No fixed-before-loop bound, so no place inside a tick. Iteration counts are declared design facts; convergence across time uses `state:`. |
+| Intra-tick feedback (cyclic data dependencies) | One tick is a DAG by single assignment. Feedback is the cross-tick loop through `state:` places — the one unbounded loop, visible in the topology. |
+| Dynamic topology | Processors and arcs are not added, removed, or rewired at runtime. Variation at runtime is guard conditions over static arcs; variation across builds is editing the wiring and baking again. |
+| Event-driven execution | A Network is a synchronous computation fired once per tick. Event collection and buffering are the host's business; inbound boundary Records are the only door in. |
+| Side effects | The Network produces outbound boundary Records; what becomes of them — pixels, waveforms, packets — happens beyond the boundary. |
 
 ---
 
 ## Versioning
 
-### Parallel to DIGS
-
-Network files do not carry an explicit version declaration in v1.0. The `network` keyword at the top of the file identifies it as a Network declaration, distinct from `record` (Record schema) and `processor` (DIGS body).
-
-Future versions of this specification may introduce a version declaration (e.g., `#! runs-net 2.0`) if breaking changes become necessary.
-
-### Evolution Rules
-
-1. **Additive only** — Future versions may add new phase types, new collection modifiers, or new annotation keywords. They may never remove or change the semantics of existing constructs.
-2. **Version 1.0 is forever** — A Network valid under version 1.0 will be valid under every future version. Its meaning will never change.
-3. **No feature flags** — The specification version is the only mechanism for feature gating. There are no compiler flags, pragmas, or conditional compilation directives.
+Network files carry no per-file version declaration in version 1.0; the `network`
+keyword identifies the file kind. Evolution rules match DIGS: additive only; a
+Network valid under 1.0 is valid and means the same thing forever; no feature
+flags. Published Networks are content-addressed, so any revision is a new artifact
+with a new ID.
 
 ---
 
-## Reference Implementation Bootstrap
+## The Oracle: Reference Tooling and Test Vectors
 
-The minimum viable tooling for the first Network compiler consists of:
+The wiring layer's claims are **asserted** until a reference implementation checks
+them. The minimum tooling:
 
-### 1. Reference Grammar File
-
-The EBNF grammar in this document, published as a machine-readable PEG file. This file is the canonical syntax definition.
-
-### 2. Reference Parser
-
-A single-file parser that reads `.runs` Network files and emits the Network structure as JSON. The JSON representation must capture:
-- Record declarations (names, types, collection bounds, source annotations)
-- Phase sequence (type, target, arguments)
-- Dispatch phases (collection, ordering, arc guards, arc targets)
-- Iterate phases (bound, nested phases)
-
-Estimated size: 400–600 lines.
-
-### 3. Reference Scheduler
-
-A tool that reads a parsed Network and produces the execution schedule: the flat sequence of Processor invocations for one tick, with concrete iteration bounds.
-
-Input: Network JSON + initial Record states.
-Output: Ordered list of `(processor, entity_index, arguments)` tuples.
-
-The scheduler is the **oracle**: any optimizing compiler's execution must produce the same output Records as executing these tuples in order.
-
-Estimated size: 300–500 lines.
-
-### 4. Test Vectors
-
-For the first RUNS game (Spacewar! 3.1), the execution schedule for one tick with known initial state:
-
-| Input State | Expected Schedule |
-|-------------|-------------------|
-| Two ships, no torpedoes | 2 ship_update calls, 22 skips, process_spawns, collision_detect, check_restart, update_scores, advance_starfield, build_render_list, display_starfield |
-| Ship fires torpedo | ship_update (slot 0) produces spawn_request; process_spawns allocates slot 2; collision_detect includes 3 active entities |
-| Ship explodes | explosion_tick (slot 0), ship_update (slot 1), 22 skips, ... |
-
-These test vectors verify that a compiler's scheduling matches the reference scheduler's output.
+1. **Reference parser** — `.runs` Network text to a structural representation
+   (places, steps, arcs, guards).
+2. **Reference validator** — the checks in §Verification Properties, including the
+   SSA lowering of name reuse.
+3. **Reference scheduler** — from a parsed Network and initial place values,
+   produce one tick's execution as an explicit sequence of invocations with
+   resolved versions. The scheduler is the oracle: any conforming runtime's tick,
+   in any execution order it chooses, must produce place values identical to the
+   scheduler's.
+4. **Tick-level test vectors** — known initial state in, expected final state out,
+   for the first converted game: two ships and no torpedoes; a ship firing
+   (spawn-request thread exercised); a ship exploding; the PRNG thread consumed in
+   slot order.
 
 ---
 
-## Relationship to Other EGS Components
-
-```
-  MAPS Notation          RUNS Source Files           Compiled Game
-  (design blueprint)     (enduring artifact)         (platform binary)
-
-  States  ─────────────→ Records (.runs)
-  Verbs   ─────────────→ Processors (.runs-prim)  ──→ native functions   ← DIGS governs
-  Arcs    ─────────────→ Networks (.runs)          ──→ compiled schedule  ← This spec governs
-  Marks   ─────────────→ Annotations               ──→ metadata tables
-```
-
-### DIGS (Deterministic Inspectable Game Syntax)
-
-DIGS defines what Processors compute. This specification defines when they fire, in what order, and over which entities. Guard expressions in Network arcs use the DIGS expression grammar. The DIGS recursion prohibition (DAG call graph) applies to sub-Processor calls within a body — it does NOT constrain the Network topology, which may invoke the same Processor at multiple points per tick.
-
-### AEMS (Asset-Entity-Manifestation-State)
-
-AEMS defines what things ARE — Entity identity, Manifestation variants, and presentation data. Data from AEMS artifacts may be consumed by RUNS Records through the `source:` annotation on state Records. The build tool reads the AEMS data, parses it according to a format specification, and populates the Record's initial state.
-
-The format specification — how binary bytes from an AEMS Manifestation, a WAD lump, or a ROM segment map to Record fields — is a separate artifact type. Format specs declare byte offsets, endianness, field widths, and data encoding. They are plain-text, inspectable, and enduring, like everything else in the ecosystem.
-
-### MAPS (Notation)
-
-MAPS describes rules as studyable notation. Network arcs with guard conditions implement MAPS arc guards. The relationship is design-to-implementation: a MAPS Score is the blueprint, a RUNS Network is the wiring that implements it.
-
-### Runtime
-
-The runtime is everything outside the Network: event collection, tick timing, rendering, audio, input polling, and platform lifecycle. The boundary between the Network and the runtime is defined by Records:
-
-- **Inbound** (`requires:`): The runtime populates these Records before each tick.
-- **Outbound** (`produces:`): The runtime reads these Records after each tick.
-
-What happens outside this boundary is the runtime's concern. The Network is a pure, synchronous, deterministic computation that transforms `requires:` Records into `produces:` Records.
-
----
-
-*MIT License — Open for implementation, extension, critique.*
+*MIT License*
