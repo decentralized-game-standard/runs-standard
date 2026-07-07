@@ -103,8 +103,8 @@ required for determinism — an unbounded list whose length is computed
 deterministically is exactly as deterministic as a bounded one. Spacewar declares
 `spacewar:object[24]` and can reach a machine with kilobytes of RAM; a factory game
 declaring `entities[]` runs anywhere with enough memory, and a constrained target is
-honestly out of its reach. The declaration is a true, portable statement of the
-game's memory needs. Changing a declared bound changes the game's rules — see the
+out of its reach. The declaration is a portable statement of the game's memory
+needs. Changing a declared bound changes the game's rules — see the
 RUNS Library's patterns document for the Variant/Port consequences.
 
 There are no pointers and no addresses anywhere in this type system. Values have

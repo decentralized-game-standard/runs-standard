@@ -108,8 +108,8 @@ loop lives in the wiring, visible in the topology — never inside a body.
 
 The cross-tick `state:` places may grow without bound (an unbounded list appended to
 every tick) and the game may run without bound. Both are legal and fully
-deterministic. Two honest consequences, which are game bugs for tooling to catch,
-not language violations: a Network *can* livelock across ticks (a feedback cycle
+deterministic. Two consequences follow, game bugs for tooling to catch rather
+than language violations: a Network *can* livelock across ticks (a feedback cycle
 whose exit guard never fires), and a `state:` list *can* leak — deterministically,
 reproducibly, identically on every machine.
 

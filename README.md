@@ -2,12 +2,8 @@
 
 🏠 **[EGS Overview](https://github.com/enduring-game-standard)** · 📦 **[AEMS](https://github.com/enduring-game-standard/aems-schema)** · 🎯 **[AEMS Conventions](https://github.com/enduring-game-standard/aems-conventions)** · 🔧 **[RUNS](https://github.com/enduring-game-standard/runs-spec)** · 📖 **[RUNS Library](https://github.com/enduring-game-standard/runs-library)** · ⚡ **[WOCS](https://github.com/enduring-game-standard/wocs-protocol)** · 🎼 **[MAPS](https://github.com/enduring-game-standard/maps-notation)** · 🎶 **[MAPS Library](https://github.com/enduring-game-standard/maps-library)** · ❓ **[FAQ](https://github.com/enduring-game-standard/.github/blob/main/profile/FAQ.md)** · 🔤 **[Glossary](https://github.com/enduring-game-standard/.github/blob/main/profile/README.md#glossary)**
 
-> **Status**: Design stage. No working reference implementation exists yet — no parser,
-> no evaluator, no compiler. The specifications below are precise enough to implement
-> from, and the first implementation is expected to correct them. Every fidelity claim
-> in this ecosystem is currently **asserted** (a person or AI judged it correct by
-> reading), not **verified** (checked mechanically against an oracle). The documents
-> say which is which. Ecosystem-wide state and the verification milestone:
+> **Status**: Draft. No parser, evaluator, or compiler exists yet; the first
+> implementation is expected to correct these specs. Ecosystem-wide state:
 > [STATUS.md](https://github.com/enduring-game-standard/.github/blob/main/profile/STATUS.md).
 
 ## What RUNS Is
@@ -23,9 +19,7 @@ components into a standalone build, the way Android and the Steam Deck are diffe
 operating systems built around the same kernel and coreutils. An open-source engine
 does not provide this — it removes the vendor but keeps the coupling, since the game
 is still written inside one engine's runtime and version churn. RUNS removes the
-coupling: the rules are source that outlives every engine that realizes them. This is
-a design-intent claim about the specification below, checkable by reading it — not a
-status claim about adoption.
+coupling: the rules are source that outlives every engine that realizes them.
 
 RUNS has exactly four primitives and one sub-language:
 
@@ -79,7 +73,7 @@ and studyable on the commons. Second, anyone can open a game's Network, swap Pro
 and bake a **variant** — variation is first-class and permissionless, the way physical
 games have always accrued house rules.
 
-## Status, Honestly
+## Status
 
 What exists today:
 

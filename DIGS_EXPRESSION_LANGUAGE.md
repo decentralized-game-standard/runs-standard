@@ -65,7 +65,7 @@ stated first.
    across machines. The cost is that the compiler must *emulate* the declared
    arithmetic where the host's native arithmetic differs. A build that instead
    substitutes hardware-native arithmetic is a **divergent compilation**
-   (§Divergent Compilation) — a different game, honestly labeled.
+   (§Divergent Compilation) — a different game, and declared as one.
 
 2. **Static execution bound.** An optional ceiling on steps per tick, for hard
    real-time targets. *Not implied by totality* — totality says "terminates,"
@@ -77,8 +77,8 @@ stated first.
    ([Record Schema §Lists](./RECORD_SCHEMA.md#lists-and-the-memory-contract)) give a
    bake-time RAM ceiling for allocator-less and constrained targets. *Not implied by
    purity, determinism, or totality.* Unbounded lists are legal DIGS; a game that
-   uses them simply cannot reach targets that cannot hold it, and the type says so
-   honestly.
+   uses them cannot reach targets that cannot hold it, and the type declaration
+   says so.
 
 The unifying rule: **the declaration IS the contract.** A type declaration pins
 arithmetic; a list bound pins memory; a literal loop count pins execution. The core
@@ -730,8 +730,8 @@ deferred mutation, no hidden post-pass: the output list is the new truth, produc
 by the Processor like any other value.
 
 A body fold that routes per-element by a state tag —
-`for entity in entities: if entity.state == spacewar:torpedo: ...` — is a legal,
-honest **mid-decomposition idiom**: the Processor is a monolith and the Network sees
+`for entity in entities: if entity.state == spacewar:torpedo: ...` — is a legal
+**mid-decomposition idiom**: the Processor is a monolith and the Network sees
 one opaque transition, so there is no Network routing being usurped. As the monolith
 is decomposed and the per-state behaviors become distinct Processors, that routing
 belongs on Network arcs as guards. Both stations are fully compliant; granularity is
@@ -897,7 +897,7 @@ declaration pins (§Game-Defined Types). The primitive `float` is itself fully
 pinned. Under strict evaluation, every DIGS numeric type produces bit-identical
 results on every conforming platform; the emulation cost on hardware whose native
 arithmetic differs is the price of that reach, and divergent compilation
-(§below) is the honest escape hatch where a build chooses not to pay it.
+(§below) is the declared escape hatch for a build that chooses not to pay it.
 
 ### Divergent Compilation
 
@@ -905,7 +905,7 @@ A build MAY deviate from strict evaluation for specific Processors — substitut
 hardware sqrt, native floating point, a smaller table — to fit a constrained target
 or buy speed. Such a build is a **divergent compilation**. Because its Rules-level
 output differs from strict evaluation, it is by definition a **variant of the game,
-not the game itself** — the honest antonym of strict, declared rather than hidden.
+not the game itself** — divergence declared, not hidden.
 
 Every divergence must be recorded in a machine-readable **deviation manifest**
 shipped with the build:
@@ -923,13 +923,12 @@ deviation_manifest:
 ```
 
 Required fields per deviation: `processor` (the qualified name deviated from),
-`substitution` (what ran instead), `justification` (why), `impact` (the honest
-statement of how output can differ). The manifest is the divergent variant's diff
-from canon — the build-time face of the asserted-vs-verified discipline: a build
+`substitution` (what ran instead), `justification` (why), `impact` (how output
+can differ). The manifest is the divergent variant's diff from canon: a build
 either matches strict evaluation bit-for-bit, or it says exactly where it doesn't.
 
 Divergent compilation is never the default, and a manifest does not make the
-divergence "still the same game." It makes it an honestly labeled variant.
+divergence "still the same game." It makes it a declared variant.
 
 ---
 
