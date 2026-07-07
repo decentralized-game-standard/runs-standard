@@ -45,10 +45,9 @@ Each document is self-sufficient and owns one layer:
 | [Record Schema](./RECORD_SCHEMA.md) | The data layer: Record, Field, enum, and game-defined type declarations; publication and identity; initial data sources. |
 | [DIGS Expression Language](./DIGS_EXPRESSION_LANGUAGE.md) | The computation layer: the full language of Processor bodies — grammar, type semantics, evaluation rules, the strict-evaluation contract, and divergent compilation. |
 | [Network Topology](./NETWORK_TOPOLOGY.md) | The wiring layer: how Records and Processors compose into a tick — single-assignment dataflow, guarded dispatch, derived execution order, and the boundary contract with the platform. |
-| [Conversion Process](./CONVERSION_PROCESS.md) | The practice: how to port an existing game into RUNS source, step by step, with acceptance criteria an agent can be held to. |
 
-A reader implementing RUNS from scratch needs the first three. A reader porting a game
-needs all four.
+Together these three documents fully specify RUNS — the data, computation, and wiring
+layers. A reader implementing RUNS from scratch needs all three.
 
 ## How a Game Is Built and Distributed
 
