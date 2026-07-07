@@ -7,7 +7,8 @@
 > from, and the first implementation is expected to correct them. Every fidelity claim
 > in this ecosystem is currently **asserted** (a person or AI judged it correct by
 > reading), not **verified** (checked mechanically against an oracle). The documents
-> say which is which.
+> say which is which. Ecosystem-wide state and the verification milestone:
+> [STATUS.md](https://github.com/enduring-game-standard/.github/blob/main/profile/STATUS.md).
 
 ## What RUNS Is
 
@@ -15,6 +16,16 @@
 logic. The substrate is the source medium itself: it binds to no engine, no vendor, no
 renderer, and no hardware generation. Game logic written as RUNS source is compiled —
 *baked* — into platform-specific builds; the source endures while platforms churn.
+
+RUNS applies the Linux model to game execution. There is no "RUNS engine," the way
+there is no single "Linux OS": each game assembles its own engine from shared
+components into a standalone build, the way Android and the Steam Deck are different
+operating systems built around the same kernel and coreutils. An open-source engine
+does not provide this — it removes the vendor but keeps the coupling, since the game
+is still written inside one engine's runtime and version churn. RUNS removes the
+coupling: the rules are source that outlives every engine that realizes them. This is
+a design-intent claim about the specification below, checkable by reading it — not a
+status claim about adoption.
 
 RUNS has exactly four primitives and one sub-language:
 
